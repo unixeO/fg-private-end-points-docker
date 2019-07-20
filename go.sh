@@ -257,6 +257,7 @@ server_run() {
         -v /lib/modules:/lib/modules \
         -v /proc:/hostfs/proc:ro \
         -v /var/run/docker.sock:/var/run/docker.sock \
+        -p 53:53 \
         --privileged \
         --net host \
         --restart always \

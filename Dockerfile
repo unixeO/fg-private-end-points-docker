@@ -31,4 +31,5 @@ ADD to_copy/ /
 
 RUN useradd -s /sbin/nologin unbound
 
+EXPOSE 53
 ENTRYPOINT ["/run.sh"]

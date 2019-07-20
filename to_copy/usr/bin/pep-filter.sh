@@ -55,20 +55,22 @@ cleanup() {
 
 fail() {
     echo "! $1" >&2
-    cleanup
+    echo "=========== FAIL ============"
+    # cleanup
     exit 1
 }
 
 
 reload_filter() {
+    echo "========== START RELOAD FILTER ==============="
     local cmd=(
         docker exec -i encryptme
         /usr/local/unbound-1.7/sbin/filter_server.py
-    # /scripts/dns-filter
     # &>/dev/null
     )
     "${cmd[@]}" stop
     "${cmd[@]}" start
+    echo "========== END RELOAD FILTER ================="
 }
 
 
@@ -102,23 +104,35 @@ add_ips() {
 
 
 add_domains() {
+    echo "======= START ADD DOMAINS ==========="
     local list_name="$1"
-    local tmp_domain_file="$TMP_DIR/domains.old"
+    local tmp_domain_file="$TMP_DIR/$list_name.domains"
     local domain_file="$FILTERS_DIR/$list_name.blacklist"
 
+    echo $tmp_domain_file
+    echo $domain_file
+
+    # Create directory and domain list file
     docker exec -i encryptme mkdir -p "$FILTERS_DIR" \
         || fail "Failed to create blacklists directory"
+
+    docker exec	-i encryptme touch "$FILTERS_DIR/$list_name.blacklist" \
+       	|| fail	"Failed to create social.blacklist"
 
     # keep things clean add keep dupes scrubbed out as we update the domain list
     docker exec -i encryptme bash -c "[ -s '$domain_file' ]"
     if [ $? -eq 0 ]; then
        docker exec -i encryptme cat "$domain_file" | sort -u > "$tmp_domain_file"
     fi
-    comm -13 "$tmp_domain_file" - \
+    cat $tmp_domain_file
+    echo "*****************"
+    cat $domain_file
+    comm -13 "$domain_file" "$tmp_domain_file" \
         | docker exec -i encryptme dd of="$domain_file" \
            || fail "Failed to write $domain_file"
     reload_filter \
        || fail "Failed to reload dns-filter"
+    echo "======== END ADD DOMAINS ================"
 }
 
 
@@ -144,6 +158,7 @@ prune_list() {
 }
 
 reset_filters() {
+    echo "======= START RESET FILTERS =================="
     list_name="${1:-}"  # if set, deletes a specific list
     # delete all ipset lists and iptables rules
     /sbin/ipset list | awk '$1 == "Name:" { print $2}' | while read list_name; do
@@ -153,17 +168,19 @@ reset_filters() {
        #   docker exec -i encryptme truncate -s 0 /usr/local/unbound-1.7/etc/unbound/whitelist.txt \
        #      || fail "Failed to delete domain list $list.txt"
        #else
-      /sbin/iptables -D ENCRYPTME -m set --match-set "$list" dst -j DROP \
-          || fail "Failed to delete iptables rule for the list $list"
-       /sbin/ipset destroy "$list" \
-          || fail "Failed to delete ipset $list"
+      echo $list_name
+      /sbin/iptables -D ENCRYPTME -m set --match-set "$list_name" dst -j DROP \
+          || fail "Failed to delete iptables rule for the list $list_name"
+       /sbin/ipset destroy "$list_name" \
+          || fail "Failed to delete ipset $list_name"
     done
 
     # remove our domain blacklists
     docker exec encryptme rm -rf "$FILTERS_DIR" \
-       || fail "Failed to delete domain lists"
+      || fail "Failed to delete domain lists"
 
     reload_filter
+    echo "================ END RESET FILTERS ====================="
 }
 
 # JKF: support this later
@@ -191,6 +208,7 @@ reset_filters() {
 
 # reads stdin to parse IPv4 CIDR ranges and domain names and filter them out
 append_list() {
+    echo "======== START APPEND LIST =============="
     local list_name="$1"
     local cidr_file="$TMP_DIR/$list_name.cidr"
     local domain_file="$TMP_DIR/$list_name.domains"
@@ -199,22 +217,22 @@ append_list() {
     exec 3> "$cidr_file"
     exec 4> "$domain_file"
     while read item; do
-        if [ "$item" = "${item%%/*}" ]; then
-            echo "$item" >&3  # CIDR range
-        else
-            echo "$item" >&4  # domain
-        fi
+        # if [ "$item" = "${item%%/*}" ]; then
+        #    echo "$item" >&3  # CIDR range
+        # else
+        echo "$item" >&4  # domain
+        # fi
     done
 
-    echo "================"
-    cat "$cidr_file"
-    cat "$domain_file"
+    # cat "$cidr_file"
+    # cat "$domain_file"
 
     [ -s "$cidr_file" ] && add_ips "$list_name" < "$cidr_file"
     # [ -s "$cidr_file" ] && add_ips "$list_name" <&3
     [ -s "$domain_file" ] && add_domains "$list_name" < "$domain_file"
     exec 3>&-
     exec 4>&-
+    echo "============ END APPEND LIST =================="
 }
 
 
@@ -254,9 +272,11 @@ esac
 }
 
 [ "$action" = "replace" ] && {
+    echo "============ START MENU REPLACE ============"
     [ $# -eq 1 ] || fail "No list name given to replace"
     list_name="$1" && shift
     append_list "$list_name"
+    echo "============ END MENU REPPLACE ============"
 }
 
 [ "$action" = "prune" ] && {
@@ -275,6 +295,6 @@ esac
 /usr/sbin/ipset save > /etc/ipset.save \
    || fail "Failed to write /etc/ipset.save"
 
-cleanup
+echo "=============== BYE PEP-FILTER.SH =========== "
 
 exit 0
