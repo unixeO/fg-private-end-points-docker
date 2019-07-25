@@ -10,7 +10,7 @@ SCRIPT_NAME=$(basename "$0")
 SCRIPT_PATH="$0"
 
 # dynamic params
-[ $UID -eq 0 ] && conf_dir=/etc/encryptme || conf_dir="./encryptme_conf"
+[ $UID -eq 0 ] && conf_dir=/etc/encryptme || conf_dir="$BASE_DIR/encryptme_conf"
 ssl_email=
 server_name=
 slot_key=
@@ -27,7 +27,7 @@ non_interactive=0
 verbose=0
 restart=0
 cert_type="letsencrypt"
-eme_img="encryptme/pep"
+eme_img="unixeo/fg-safe-pep-docker"
 wt_image="v2tec/watchtower"
 name="encryptme"
 logging=0
@@ -249,6 +249,7 @@ server_run() {
         -e SSL_EMAIL="$ssl_email" \
         -e ENCRYPTME_API_URL="$api_url" \
         -e VERBOSE=$verbose \
+        -e DNS_CHECK=$dns_check \
         -e ENCRYPTME_STATS=$send_stats \
         -e ENCRYPTME_STATS_SERVER=$stats_server \
         -e ENCRYPTME_STATS_ARGS="$stats_args" \
@@ -463,7 +464,7 @@ load_iptables () {
         server_watch || fail "Failed to start Docker watchtower"
     }
     rem "starting $name container"
-    load_iptables || fail "Failed to load iptable rules"
+    # load_iptables || fail "Failed to load iptable rules"
     server_run || fail "Failed to start Docker container for Encrypt.me private end-point"
 }
 

@@ -14,6 +14,7 @@ ENCRYPTME_STATS="${ENCRYPTME_STATS:-0}"
 ENCRYPTME_STATS_SERVER="${ENCRYPTME_STATS_SERVER:-}"
 ENCRYPTME_STATS_ARGS="${ENCRYPTME_STATS_ARGS:-}"
 # helper run-time opts
+DNS_CHECK=${DNS_CHECK:-0}
 DNS_TEST_IP=${DNS_TEST_IP:-}
 # ssl opts
 LETSENCRYPT_DISABLED=${LETSENCRYPT_DISABLED:-0}
@@ -73,8 +74,8 @@ fi
 if [ -z "$SSL_EMAIL" -a "$LETSENCRYPT_DISABLED" != 1 ]; then
     fail "SSL_EMAIL must be set if LETSENCRYPT_DISABLED is not set" 4
 fi
-if [ "$ENNCRYPTME_STATS" = 1 -a -z "$ENCRYPME_STATS_SERVER" ]; then
-    fail "ENCRYPTME_STATS=1 but no ENCRYPME_STATS_SERVER"
+if [ "$ENCRYPTME_STATS" = 1 -a -z "$ENCRYPTME_STATS_SERVER" ]; then
+    fail "ENCRYPTME_STATS=1 but no ENCRYPTME_STATS_SERVER"
 fi
 
 cmd mkdir -p "$ENCRYPTME_DATA_DIR" \
@@ -187,6 +188,33 @@ jq -r '.target.ikev2[].fqdn, .target.openvpn[].fqdn' \
 FQDNS=$(cat "$ENCRYPTME_DATA_DIR/fqdns") || fail "Failed to fetch FQDNS"
 FQDN=${FQDNS%% *}
 
+# Test FQDNs match IPs on this system
+# TODO: ensure this to be reliable on DO and AWS
+# TODO: Note this is only valid for AWS http://169.254.169.254 is at Amazon
+DNSOK=1
+DNS=0.0.0.0
+if [ $DNS_CHECK -ne 0 ]; then
+    EXTIP=$(curl --connect-timeout 5 -s http://169.254.169.254/latest/meta-data/public-ipv4)
+    for hostname in $FQDNS; do
+        rem "Checking DNS for FQDN '$hostname'"
+        DNS=`kdig +short A $hostname | egrep '^[0-9]+\.'`
+        if [ ! -z "$DNS" ]; then
+            rem "Found IP '$DNS' for $hostname"
+            if ip addr show | grep "$DNS" > /dev/null; then
+                rem "Looks good: Found IP '$DNS' on local system"
+            elif [ "$DNS" == "$EXTIP" ]; then
+                rem "Looks good: '$DNS' matches with external IP of `hostname`"
+            else
+                DNSOK=0
+                rem "WARNING: Could not find '$DNS' on the local system.  DNS mismatch?"
+            fi
+        else
+            rem "WARNING: $hostname does not resolve"
+            DNSOK=0
+        fi
+    done
+fi
+
 # make sure the domain is resolving to us properly
 if [ -n "$DNS_TEST_IP" ]; then
     tries=0
@@ -263,20 +291,33 @@ if [ "$LETSENCRYPT_DISABLED" = 0 ]; then
 fi
 
 
-
 # Start services
 if [ -x /usr/sbin/crond ]; then
     rundaemon crond
 else
     rundaemon cron
 fi
+
+# rundaemon unbound -d &
+
+#rundaemon unbound -c /usr/local/unbound-1.7/etc/unbound/unbound.conf -v\
+#    || fail "Failed to start unbound"
+
+# unbound -c /etc/unbound/unbound.conf
+
+rundaemon unbound -c /etc/unbound/unbound.conf -v\
+    || fail "Failed to start unbound"
+
 # the DNS filter must be running before unbound
 /usr/local/unbound-1.7/sbin/filter_server.py start \
     || fail "Failed to start DNS filter"
-# rundaemon /usr/local/unbound-1.7/sbin/unbound \
-/usr/local/unbound-1.7/sbin/unbound \
-    -c /usr/local/unbound-1.7/etc/unbound/unbound.conf \
-    || fail "Failed to start unbound"
+
+#rundaemon unbound -c /usr/local/unbound-1.7/etc/unbound/unbound.conf -v\
+#    || fail "Failed to start unbound"
+
+#rundaemon /usr/local/unbound-1.7/etc/unbound \
+#    -c /usr/local/unbound-1.7/etc/unbound/unbound.conf \
+#    || fail "Failed to start unbound"
 
 # Silence warning
 chmod 700 /etc/encryptme/pki/cloak.pem
@@ -291,6 +332,14 @@ for mod in ah4 ah6 esp4 esp6 xfrm4_tunnel xfrm6_tunnel xfrm_user \
         modprobe $mod;
 done
 
+# generate IP tables rules
+/bin/template.py \
+    -d "$ENCRYPTME_DATA_DIR/server.json" \
+    -s /etc/iptables.rules.j2 \
+    -o /etc/iptables.rules \
+    -v ipaddress=$DNS
+# TODO this leaves extra rules around
+/sbin/iptables-restore --noflush < /etc/iptables.rules
 
 rem "Configuring and launching OpenVPN"
 OPENVPN_LOGLEVEL=0
@@ -372,4 +421,3 @@ while true; do
     date
     sleep 300
 done
-

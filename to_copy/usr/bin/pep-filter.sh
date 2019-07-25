@@ -188,7 +188,6 @@ reset_filters() {
 #    fi
 #}
 
-
 # reads stdin to parse IPv4 CIDR ranges and domain names and filter them out
 append_list() {
     local list_name="$1"

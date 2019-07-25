@@ -2,8 +2,9 @@
 charon {
     # You should push DNS servers with public IPs, so that all queries will be
     # routed through the tunnel.
-    dns1 = 100.64.0.1
-
+    # dns1 = 0.0.0.0
+    dns1 = 8.8.8.8
+    # dns2 = 8.8.4.4
     # https://wiki.strongswan.org/projects/strongswan/wiki/LoggerConfiguration
     syslog {
         daemon {

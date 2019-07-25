@@ -11,68 +11,47 @@ sock_file = "/usr/local/unbound-1.7/etc/unbound/dns_filter.sock"
 sock_exist = False
 
 
-def check_for_socket():
-    global sock_exist
-    for _ in range(4):
-        if os.path.exists(sock_file):
-            sock_exist = True
-            break
-        sleep(0.25)
-
-
-def is_blocked(name):
-    # block this name, and any subdomains of that name 
-    while True:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(sock_file)
-        sock.sendall(json.dumps({'domain': name}))
-        return bool(str(sock.recv(2048)))
-
-
 def init(id, cfg):
-    check_for_socket()
     return True
-
 
 def deinit(id):
     return True
 
-
 def inform_super(id, qstate, superqstate, qdata):
     return True
 
+domains = [
+    "netflix.com.",
+    "facebook.com.",
+]
 
 def operate(id, event, qstate, qdata):
-    if (event == MODULE_EVENT_NEW) or (event == MODULE_EVENT_PASS):
-        name = qstate.qinfo.qname_str.rstrip('.')
-
-        # not blocked or server isn't running? do nothing
-        if not sock_exist or not is_blocked(name):
+    if event == MODULE_EVENT_NEW or event == MODULE_EVENT_PASS:
+        if qstate.qinfo.qtype != RR_TYPE_AAAA:
             qstate.ext_state[id] = MODULE_WAIT_MODULE
             return True
 
-        # otherwise, respond with our intercept address
-        msg = DNSMessage(qstate.qinfo.qname_str, RR_TYPE_A,
-                         RR_CLASS_IN, PKT_QR | PKT_RA | PKT_AA)
-        if (qstate.qinfo.qtype == RR_TYPE_A) or (
-                qstate.qinfo.qtype == RR_TYPE_ANY):
-            msg.answer.append(
-                "%s 10 IN A %s" % (qstate.qinfo.qname_str,
-                                   intercept_address))
+        for domain in domains:
+            if qstate.qinfo.qname_str == domain or qstate.qinfo.qname_str.endswith("." + domain):
+                msg = DNSMessage(qstate.qinfo.qname_str, RR_TYPE_A, RR_CLASS_IN, PKT_QR | PKT_RA | PKT_AA)
+                if not msg.set_return_msg(qstate):
+                    qstate.ext_state[id] = MODULE_ERROR
+                    return True
+                # We don't need validation, result is valid
+                qstate.return_msg.rep.security = 2
+                qstate.return_rcode = RCODE_NOERROR
+                qstate.ext_state[id] = MODULE_FINISHED
+                log_info("no-aaaa: blocking AAAA request for %s" % qstate.qinfo.qname_str)
+                return True
 
-        if not msg.set_return_msg(qstate):
-            qstate.ext_state[id] = MODULE_ERROR
-            return True
-
-        qstate.return_msg.rep.security = 2
-
-        qstate.return_rcode = RCODE_NOERROR
-        qstate.ext_state[id] = MODULE_FINISHED
+        qstate.ext_state[id] = MODULE_WAIT_MODULE
         return True
 
-    elif event == MODULE_EVENT_MODDONE:
+    if event == MODULE_EVENT_MODDONE:
         qstate.ext_state[id] = MODULE_FINISHED
         return True
 
     qstate.ext_state[id] = MODULE_ERROR
     return True
+
+log_info("pythonmod: script loaded")
